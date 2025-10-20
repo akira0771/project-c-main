@@ -12,8 +12,7 @@ on:
 
 jobs:
   scrape-and-upload:
-    [cite_start]runs-on: ubuntu-latest [cite: 4]
-
+　　[cite_start]runs-on: ubuntu-latest [cite: 4]
     steps:
       # 1. ソースコードをチェックアウト
       - name: Checkout repository
