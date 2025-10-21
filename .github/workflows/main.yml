@@ -26,9 +26,11 @@ jobs:
 
       - name: Create credentials.json 🔑
         # GitHub Secretsに保存されたサービスアカウントキーをファイルとして書き出す
+        # スクリプト (main_c.py) はこのファイルを読み込んで認証を行います
         run: echo '${{ secrets.GDRIVE_CREDENTIALS }}' > credentials.json
         env:
           GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
 
       - name: Run data processor script 📊
-        run: python data_processor.py
+        # スクリプト名が main_c.py であることを指定
+        run: python main_c.py
