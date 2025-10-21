@@ -1,19 +1,16 @@
 import pandas as pd
 import io
 import numpy as np
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
 # --- Google Drive ファイルID 設定 ---
-# 担当者から共有されたIDを埋め込み済み
 YOUTUBE_MASTER_FILE_ID = '1fZntJuEUcpTeXcbR5aGWvVj8WfsAE_Cb'
 ATTENDANCE_MASTER_FILE_ID = '1EJeJ5215gngU_7YxlFnj_3kFA4q--Koe'
 FINAL_ANALYSIS_FOLDER_ID = '1w8pmCqX2TxJHfearx1XBmm4XRAXsV8We'
 
-# ⚠️ ナンバリングの列名を設定（ユーザーの指定により 'no' を使用）
+# ナンバリングの列名を設定
 YOUTUBE_RANKING_COLUMN = 'no' 
-
-# Google Drive操作のためにPyDrive2と認証関連のライブラリをインポート
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
 
 # --- Google Drive 認証とファイル操作関数 ---
 
@@ -47,7 +44,6 @@ def download_existing_movie_csv(drive_service, folder_id, file_name):
         if file_list:
             file = file_list[0]
             downloaded_content = file.GetContentString(mimetype='text/csv')
-            # 既存ファイルの'日付'カラムを日付型として読み込みます
             df = pd.read_csv(io.StringIO(downloaded_content), parse_dates=['日付'])
             print(f"既存ファイル {file_name} をダウンロードしました。")
             return df
