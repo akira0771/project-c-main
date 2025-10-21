@@ -1,6 +1,7 @@
 import pandas as pd
 import io
 import numpy as np
+import sys # sysモジュールを追加して、エラー時にスクリプトを中断できるようにする
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 
@@ -16,21 +17,28 @@ YOUTUBE_RANKING_COLUMN = 'no'
 
 def authenticate_drive():
     """GitHub Actions環境でSecretsから生成された認証情報で認証を行う"""
-    gauth = GoogleAuth()
-    gauth.DEFAULT_SETTINGS['client_config_file'] = 'credentials.json' 
-    gauth.LocalWebserverAuth = lambda: None 
-    gauth.ServiceAuth()
-    return GoogleDrive(gauth)
+    try:
+        gauth = GoogleAuth()
+        # GitHub ActionsのワークフローでサービスアカウントのJSONファイルを
+        # このパスに書き出していることを前提とする
+        gauth.DEFAULT_SETTINGS['client_config_file'] = 'credentials.json' 
+        gauth.LocalWebserverAuth = lambda: None 
+        gauth.ServiceAuth()
+        return GoogleDrive(gauth)
+    except Exception as e:
+        print(f"❌ 認証エラー: Google Driveの認証に失敗しました。{e}")
+        return None # 失敗時はNoneを返す
 
 def download_csv_to_dataframe(drive_service, file_id):
     """ファイルIDを指定してCSVをダウンロードし、Pandas DataFrameとして返す"""
     try:
         file = drive_service.CreateFile({'id': file_id})
         downloaded_content = file.GetContentString(mimetype='text/csv')
+        # 'date'列を日付型として解析する
         df = pd.read_csv(io.StringIO(downloaded_content), parse_dates=['date'])
         return df
     except Exception as e:
-        print(f"エラー: ファイルID {file_id} のダウンロードまたは読み込みに失敗しました: {e}")
+        print(f"❌ エラー: ファイルID {file_id} のダウンロードまたは読み込みに失敗しました: {e}")
         return None
 
 def download_existing_movie_csv(drive_service, folder_id, file_name):
@@ -44,13 +52,14 @@ def download_existing_movie_csv(drive_service, folder_id, file_name):
         if file_list:
             file = file_list[0]
             downloaded_content = file.GetContentString(mimetype='text/csv')
+            # '日付'列を日付型として解析する
             df = pd.read_csv(io.StringIO(downloaded_content), parse_dates=['日付'])
             print(f"既存ファイル {file_name} をダウンロードしました。")
             return df
         else:
             return None 
     except Exception as e:
-        print(f"警告: 既存ファイル {file_name} のダウンロード中にエラーが発生しました: {e}")
+        print(f"⚠️ 警告: 既存ファイル {file_name} のダウンロード中にエラーが発生しました: {e}")
         return None
 
 def upload_dataframe_as_csv(drive_service, df, folder_id, file_name):
@@ -79,30 +88,35 @@ def upload_dataframe_as_csv(drive_service, df, folder_id, file_name):
         print(f"✅ ファイルのアップロード/更新が完了しました: {file_name}")
 
     except Exception as e:
-        print(f"エラー: {file_name} のアップロードに失敗しました: {e}")
+        print(f"❌ エラー: {file_name} のアップロードに失敗しました: {e}")
+        # アップロード失敗は致命的ではないが、処理は継続させる
 
 def get_or_create_folder_id(drive_service, parent_folder_id, folder_name):
     """指定された親フォルダ内にフォルダを検索し、なければ作成してIDを返す"""
-    # フォルダの検索クエリ
-    query = f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and '{parent_folder_id}' in parents and trashed=false"
-    file_list = drive_service.ListFile({'q': query}).GetList()
+    try:
+        # フォルダの検索クエリ
+        query = f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and '{parent_folder_id}' in parents and trashed=false"
+        file_list = drive_service.ListFile({'q': query}).GetList()
 
-    if file_list:
-        folder_id = file_list[0]['id']
-        print(f"既存のフォルダ '{folder_name}' を使用します。ID: {folder_id}")
-        return folder_id
-    else:
-        # フォルダの作成
-        folder_metadata = {
-            'title': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [{'id': parent_folder_id}]
-        }
-        folder = drive_service.CreateFile(folder_metadata)
-        folder.Upload()
-        folder_id = folder['id']
-        print(f"新規フォルダ '{folder_name}' を作成しました。ID: {folder_id}")
-        return folder_id
+        if file_list:
+            folder_id = file_list[0]['id']
+            print(f"既存のフォルダ '{folder_name}' を使用します。ID: {folder_id}")
+            return folder_id
+        else:
+            # フォルダの作成
+            folder_metadata = {
+                'title': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [{'id': parent_folder_id}]
+            }
+            folder = drive_service.CreateFile(folder_metadata)
+            folder.Upload()
+            folder_id = folder['id']
+            print(f"新規フォルダ '{folder_name}' を作成しました。ID: {folder_id}")
+            return folder_id
+    except Exception as e:
+        print(f"❌ フォルダ操作エラー: '{folder_name}' の取得または作成に失敗しました: {e}")
+        return None
 
 
 # --- メイン処理ロジック ---
@@ -110,8 +124,8 @@ def get_or_create_folder_id(drive_service, parent_folder_id, folder_name):
 def main_processor():
     drive_service = authenticate_drive()
     if drive_service is None:
-        print("致命的なエラー: Google Driveの認証に失敗しました。")
-        return
+        print("致命的なエラー: Google Driveの認証に失敗しました。スクリプトを終了します。")
+        sys.exit(1) # 認証失敗時は即時終了
 
     # 1. データをダウンロード・読み込み
     df_youtube = download_csv_to_dataframe(drive_service, YOUTUBE_MASTER_FILE_ID)
@@ -119,7 +133,7 @@ def main_processor():
 
     if df_youtube is None or df_attendance is None:
         print("致命的なエラー: 入力データのダウンロードに失敗しました。処理を中断します。")
-        return
+        sys.exit(1) # ダウンロード失敗時は即時終了
 
     # 2. データの結合と必要な列の抽出/加工
     
@@ -137,6 +151,7 @@ def main_processor():
     
     if len(combined_df) == 0:
         print("警告: 結合レコードが0件です。日次のデータが両方に存在しませんでした。")
+        # 0件でもエラーとはしないが、警告を出して終了
         return
 
     # 最終的な出力列を選択し、列名を日本語に統一
@@ -154,63 +169,4 @@ def main_processor():
     })
     
     # 'ナンバリング'列を整数型に変換（フォルダ名として使用するため、小数点以下を削除）
-    final_combined_df['ナンバリング'] = final_combined_df['ナンバリング'].astype(str).str.replace(r'\..*$', '', regex=True).astype(int)
-
-    print(f"✅ マスターデータの結合と加工が完了しました。総レコード数: {len(final_combined_df)}")
-
-    # 3. ナンバリングフォルダの作成とファイル更新（2段階のループ）
-    
-    ranking_ids = sorted(final_combined_df['ナンバリング'].unique())
-
-    for ranking_id in ranking_ids:
-        # 3-1. ナンバリングフォルダのIDを取得 (存在しなければ作成)
-        ranking_folder_id = get_or_create_folder_id(
-            drive_service, 
-            FINAL_ANALYSIS_FOLDER_ID, 
-            str(ranking_id) # フォルダ名は文字列
-        )
-        
-        # ナンバリングで絞り込んだデータ
-        df_ranking_data = final_combined_df[final_combined_df['ナンバリング'] == ranking_id].copy()
-
-        # 3-2. ナンバリング内のデータをさらに映画名でループ
-        movie_titles_in_ranking = df_ranking_data['映画名'].unique()
-        
-        for movie in movie_titles_in_ranking:
-            # 映画ごとの新しい日次データ
-            df_new_data = df_ranking_data[df_ranking_data['映画名'] == movie].copy()
-            
-            # ファイル名の定義 (例: '映画A.csv')
-            output_file_name = f"{movie}.csv"
-            
-            # 既存の映画別ファイルをダウンロード (ナンバリングフォルダからダウンロード)
-            df_existing = download_existing_movie_csv(drive_service, ranking_folder_id, output_file_name)
-            
-            if df_existing is not None and not df_existing.empty:
-                # 既存データと新しい日次データを結合
-                df_updated = pd.concat([df_existing, df_new_data], ignore_index=True)
-                
-                # 重複行の削除（日付と映画名で上書き）
-                df_updated.drop_duplicates(
-                    subset=['映画名', '日付'], 
-                    keep='last', 
-                    inplace=True
-                )
-                print(f"📈 {output_file_name} を更新しました。レコード数: {len(df_updated)}")
-            else:
-                df_updated = df_new_data
-                print(f"🚀 {output_file_name} を新規作成します。")
-
-            # 4. Google Driveのナンバリングフォルダにアップロード
-            upload_dataframe_as_csv(
-                drive_service, 
-                df_updated, 
-                ranking_folder_id, 
-                output_file_name
-            )
-        
-    print("\n✅ 全ナンバリングフォルダへのファイル更新が完了しました。")
-
-
-if __name__ == '__main__':
-    main_processor()
+    # .astype(str) -> .str.replace ->
